@@ -10,6 +10,7 @@
 //- Rev 1: Added support for 12V trigger input. Removed most of intro text and added note about GitHub page. 
 //- Rev 2: Corrected issue which would cause the sled to constantly want to move, then stop, then move, then stop. Fixed by adding in control variable
 //  for movement function
+//- Rev 3: Further refinements to switch handling. Added condition for when both switches are open
 //
 //This program controls a stepper motor attached to a slide mechanism that moves an anamorphic lens into and out of position in front of a projector.
 //I created it because new motorized slides don't seem to be widely available anymore and used ones are either pricy or only available when also
@@ -37,7 +38,8 @@ const int pause = 450;       //Define motor pulse delay
 const int LEFT = 1;          //Define left value for variable controlling motor movement. 
 const int RIGHT = 2;         //Define right value for variable controlling motor movement
 const int STOP = 0;          //Define stop value for variable controlling motor movement 
-const int START = 3;         //Define start value for variable controlling motor movement
+const int START = 1;         //Define start value for variable controlling motor movement
+const int OPEN = 3;          //Define value for when both switches are open.
 const int ON = 1;            //Define ON value for the trigger and infrared switch variables
 const int OFF = 0;           //Define OFF value for the trigger and infrared switch variable;
 const int bounce = 500;      //Define a bounce delay to avoid double sensing inputs. I like adding this to most of my functions.
@@ -46,7 +48,8 @@ boolean leftstate = 0;       //Create a boolean variable for the state of the le
 boolean rightstate = 0;      //Create a boolean variable for the state of the right limit switch
 boolean triggerstate = 0;    //Create a boolean variable for the state of trigger input
 boolean lasttriggerstate = 0;//Create a boolean variable for the last state of the trigger input
-boolean startmove = 0;       //Create a boolean variable for the movement state. 
+int startmove = 0;       //Create a boolean variable for the movement state. 
+int switches = 0;        //Create a boolean variable for the switches that can be passed to other functions
 int movement = 0;            //Create a variable for controlling motor movement
 
 // --------INSTANCES---------------
@@ -67,7 +70,6 @@ void setup(){
   pinMode(RECV_PIN, INPUT);   //Set IR receiver pin as input
   pinMode(trigPin, INPUT);    //Set trigger input pin as input
   irrecv.enableIRIn();        //Enable IR receiver input
-  Serial.begin(9600);
 }
 
 void(* resetFunc) (void) = 0;  //This is a reset function we can use to reset the board with an IR command
@@ -98,22 +100,18 @@ if(irrecv.decode(&results)){
    //This section uses a switch function along with the IR input results to set the variables used by the other functions.
         switch(results.value){
           case 0xFF22DD: //Left
-             Serial.println("IR LEFT");
               movement = LEFT;
           break;
           
           case 0xFFC23D: //Right
-              Serial.println("IR RIGHT");
               movement = RIGHT;
           break ;  
 
            case 0xFF02FD: //Stop
-             Serial.println("IR STOP");
               movement = STOP;
           break ;  
 
            case 0xFF7A85: //Reset the board
-              //Serial.println("INFRARED RESET");
               resetFunc(); 
          break;     
         }
@@ -128,49 +126,53 @@ if(irrecv.decode(&results)){
 //-----------------------------
 void readTrigger(){
   triggerstate = analogRead(trigPin);
-  Serial.println(triggerstate);
   
   if(triggerstate != lasttriggerstate){
     delay(bigbounce);
   
   if(triggerstate != lasttriggerstate){
     if(triggerstate == HIGH){
-     Serial.println("TRIGGER HIGH");
       movement = LEFT;}
     
     if(triggerstate == LOW){
-     Serial.println("TRIGGER LOW");
       movement = RIGHT;}
       delay(bounce);
    lasttriggerstate = triggerstate;}}
 }
 
 //----Limit Switch Read Function---
-//Reads the state of the limit switches and sets variable values based on those states. 
+//Reads the state of the limit switches
 //---------------------------------
 void readSwitches(){
   rightstate = digitalRead(SWITCHR);
   leftstate = digitalRead(SWITCHL);
-  if(rightstate == LOW && movement == RIGHT || leftstate == LOW && movement == LEFT){
-    movement = STOP;
-    startmove = STOP;
-    Serial.println("SWITCH STOP");
-    delay(bounce);
+  
+  if(rightstate == HIGH && leftstate == LOW){
+    switches = RIGHT;
+    //Serial.println("RIGHT");
+    
+    }
+  if(leftstate == HIGH && rightstate == LOW){
+    switches = LEFT;
+    //Serial.println("LEFT");
+    }
+ 
+  if(leftstate == HIGH && rightstate == HIGH){
+    switches = OPEN;}
   }
-}
-
 //----Set Direction Function---
-//Sets the direction of the motor's movement based on the variable values set in the IR or trigger read functions.
+//Sets the direction of the motor's movement based on the variable values set in the IR, trigger, and switch read functions.
 //-----------------------------
 void setDirection(){
-  if(movement == RIGHT && rightstate == HIGH){         //Set direction as right
+  if(movement == RIGHT && switches == RIGHT || movement == RIGHT && switches == OPEN){         //Set direction as right
     startmove = START;
     digitalWrite(dirPin,LOW);}
-  if(movement == LEFT && leftstate == HIGH){          //Set direction as left
+  if(movement == LEFT && switches == LEFT || movement == LEFT && switches == OPEN){          //Set direction as left
     startmove = START;
     digitalWrite(dirPin,HIGH);}
-  if(movement == STOP){                               //Set direction as stop
+  if(switches == LEFT && movement == RIGHT || switches == RIGHT && movement == LEFT){   //Set direction as stop
     startmove = STOP;
+    movement = STOP;
     digitalWrite(enPin,LOW);}    
 }
 
@@ -178,8 +180,7 @@ void setDirection(){
 //Moves the sled based on movement variable values.
 //-----------------------------
 void Move(){
-if(movement != STOP && startmove == START){
-    Serial.println("MOVE");
+if(startmove == START){
     digitalWrite(enPin,HIGH);
     digitalWrite(stepPin,HIGH);
     delayMicroseconds(pause); 
